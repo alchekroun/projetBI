@@ -1,9 +1,29 @@
+from datetime import date
+
 import pandas as pd
 import numpy as np
 
 from typing import Union
 
 NB_JOURS_ANNEE = 253  # Trading day https://en.wikipedia.org/wiki/Trading_day
+
+
+def courbe_taux(date: float) -> float:
+    date = date if date > 0 else 0.0001
+    beta_0 = 0.0509387294135403
+    beta_1 = -0.0300728704714689
+    beta_2 = 0.0198996013841474
+    beta_3 = -0.0834749661479616
+    tau_0 = 0.109427785737843
+    tau_1 = 0.241789711613793
+    
+    return beta_0 + beta_1 * ((1 - np.exp(-date / tau_0)) / (date / tau_0)) + beta_2 * (((1 - np.exp(-date / tau_0)) / (date / tau_0)) - np.exp(-date / tau_0)) + beta_3 * (((1 - np.exp(-date / tau_1)) / (date / tau_1)) - np.exp(-date / tau_1))
+
+
+def discount_factor(t_0: int, grand_t: int) -> float:
+    x = (1 + courbe_taux(grand_t))**grand_t
+    y = (1 + courbe_taux(t_0))**(-t_0)
+    return y/x
 
 
 def get_rendements(nav: Union[pd.Series, list], benchmark: Union[pd.Series, list]) -> pd.DataFrame:
@@ -74,3 +94,37 @@ def get_vol(nav_rendement: Union[pd.Series, list], benchmark_rendement: Union[pd
     df_vol.loc["Benchmark"] = vol_benchmark * np.sqrt(NB_JOURS_ANNEE)
 
     return df_vol
+
+def rebase_df(df: pd.DataFrame, cm: bool = True) -> pd.DataFrame:
+    """
+    Rebasing values on 1. If cm is True it's comparing each day with the previous one, if it False it's comparing with the first day.
+    """
+    if cm:
+        returns = df / df.shift(1)
+    
+        length = returns.shape[0]
+
+        def rebase_series(serie: pd.Series) -> pd.Series:
+            s = [0] * length
+            s[0] = 1
+
+            for i in range(1, length):
+                s[i] = s[i - 1] * (serie[i] + 0 if cm else 1)
+            return pd.Series(s)
+
+        return returns.apply(lambda x: rebase_series(x), axis=0)
+    else:
+        returns = df / df.iloc[0]
+        
+        return returns.reset_index(drop=True)
+
+def clean_df_time_series(df: pd.DataFrame, name: str = 'value', start_date: date = None) -> pd.DataFrame:
+    df['date'] = pd.to_datetime(df['date']).dt.date
+    if start_date:
+        df = df[df['date'] > start_date]
+    return df.set_index('date').rename(columns={'value': name})
+
+def garantie_max(nav):
+    x = 1
+    y = 0.85
+    return max(y * np.max(nav), x)
